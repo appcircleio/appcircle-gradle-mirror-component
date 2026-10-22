@@ -1,0 +1,67 @@
+// Written by the Appcircle Gradle Mirror step.
+//
+// Sends every remote Maven repository of the build to the mirror (a repository group on the artifact proxy).
+// The URL and the credentials are read from the environment when Gradle runs. The file holds no URL and no
+// secret: on a runner that keeps the Gradle user home between builds, it does nothing for a build whose
+// environment has no AC_MIRROR_GRADLE.
+//
+// Explicit import: Gradle 7.0 does not import GradleVersion into init scripts by default (7.6 and later do).
+import org.gradle.util.GradleVersion
+
+def mirrorUrl = System.getenv('AC_MIRROR_GRADLE')
+if (!mirrorUrl) { return }
+if (!mirrorUrl.endsWith('/')) { mirrorUrl += '/' }
+def mirrorUri = new URI(mirrorUrl)
+// Same precedence as the step: the Gradle pair, otherwise the pair shared by all mirror steps.
+def mirrorUser = System.getenv('AC_MIRROR_GRADLE_USERNAME')
+def mirrorPassword = System.getenv('AC_MIRROR_GRADLE_PASSWORD')
+if (!mirrorUser && !mirrorPassword) {
+  mirrorUser = System.getenv('AC_MIRROR_USERNAME')
+  mirrorPassword = System.getenv('AC_MIRROR_PASSWORD')
+}
+def shownUrl = { URI u -> new URI(u.scheme, null, u.host, u.port, u.path, null, null).toString() }
+
+def useMirror = { MavenArtifactRepository repo ->
+  if (mirrorUser) {
+    repo.credentials { username = mirrorUser; password = mirrorPassword }
+    // Preemptive: without it Gradle sends the credentials only after a 401, so a mirror that also
+    // allows anonymous reads never sees the user.
+    repo.authentication { basic(BasicAuthentication) }
+  }
+}
+def mirror = { RepositoryHandler handler ->
+  handler.all { ArtifactRepository repo ->
+    if (!(repo instanceof MavenArtifactRepository)) { return }
+    def url = repo.url
+    // Local repositories (mavenLocal(), file: repositories of React Native) stay as they are.
+    if (!(url?.scheme in ['http', 'https'])) { return }
+    // Already on the proxy (the mirror itself, or another repository of the same proxy that a tool points at,
+    // such as Flutter's engine repository under FLUTTER_STORAGE_BASE_URL): keep it, only add the credentials.
+    if (url.host == mirrorUri.host && url.port == mirrorUri.port) { useMirror(repo); return }
+    println "Gradle Mirror: ${repo.name} ${shownUrl(url)} -> ${shownUrl(mirrorUri)}"
+    repo.url = mirrorUri
+    useMirror(repo)
+  }
+}
+
+// beforeSettings: the rules are in place before the settings script adds its repositories and resolves its
+// plugins {} block (settingsEvaluated is too late for that).
+beforeSettings { settings ->
+  // Plugin ids that rely on the implicit Gradle Plugin Portal resolve from the mirror too.
+  settings.pluginManagement.repositories.maven { name = 'AppcircleGradleMirror'; url = mirrorUri }
+  mirror(settings.pluginManagement.repositories)
+  mirror(settings.dependencyResolutionManagement.repositories)
+}
+
+// Gradle 8.8+: lifecycle.beforeProject also works with isolated projects, which reject allprojects {}.
+if (GradleVersion.current() >= GradleVersion.version('8.8')) {
+  gradle.lifecycle.beforeProject { project ->
+    mirror(project.buildscript.repositories)
+    mirror(project.repositories)
+  }
+} else {
+  allprojects {
+    mirror(buildscript.repositories)
+    mirror(repositories)
+  }
+}

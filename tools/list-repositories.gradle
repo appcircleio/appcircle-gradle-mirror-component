@@ -1,0 +1,64 @@
+// list-repositories.gradle: prints every remote Maven repository a Gradle build declares, once each.
+//
+// For customers preparing an artifact proxy: run it once on a machine where the build works (internet
+// access), before moving the build to an air-gapped runner. Every URL it prints must be served by the
+// proxy group that the Gradle Mirror step points at (AC_MIRROR_GRADLE).
+//
+//   ./gradlew -I list-repositories.gradle <the task your build runs> --dry-run
+//   for example: ./gradlew -I list-repositories.gradle app:bundleRelease --dry-run
+//
+// Use the task of the real build (in Appcircle: <module>:bundle<Variant> or <module>:assemble<Variant>, see
+// the Android Build step log); list every flavor that is built. --dry-run configures the projects the task
+// needs without running anything. A cached configuration is not reused, because the extra init script
+// changes the configuration cache key. Do not pass --no-configuration-cache: Gradle refuses it when
+// isolated projects are on. A URL can appear once per included build (each build runs the script itself).
+// Covers settings (pluginManagement, dependencyResolutionManagement, settings buildscript), buildscript
+// and project repositories, included builds and buildSrc, and repositories that plugins add while the
+// build is configured. Works on Gradle 7.0 to 9.x, with or without isolated projects.
+import org.gradle.util.GradleVersion
+
+import java.util.concurrent.ConcurrentHashMap
+
+def seen = ConcurrentHashMap.newKeySet()
+def report = { String where, ArtifactRepository repo ->
+  if (!(repo instanceof MavenArtifactRepository)) { return }
+  def url = repo.url
+  if (url == null || !(url.scheme in ['http', 'https'])) { return }
+  def shown = new URI(url.scheme, null, url.host, url.port, url.path, null, null).toString()
+  if (seen.add(shown)) {
+    println "Repository: ${shown}  (first declared in ${where}, name '${repo.name}')"
+  }
+}
+def watch = { String where, RepositoryHandler handler ->
+  handler.all { ArtifactRepository repo -> report(where, repo) }
+}
+
+beforeSettings { settings ->
+  def build = settings.rootDir.name
+  watch("${build} settings pluginManagement", settings.pluginManagement.repositories)
+  watch("${build} settings buildscript", settings.buildscript.repositories)
+  if (GradleVersion.current() >= GradleVersion.version('6.8')) {
+    watch("${build} settings dependencyResolutionManagement", settings.dependencyResolutionManagement.repositories)
+  }
+}
+settingsEvaluated { settings ->
+  // No pluginManagement repositories: plugin ids resolve from the Gradle Plugin Portal.
+  if (settings.pluginManagement.repositories.isEmpty()) {
+    def shown = 'https://plugins.gradle.org/m2/'
+    if (seen.add(shown)) {
+      println "Repository: ${shown}  (Gradle Plugin Portal, implicit default of ${settings.rootDir.name})"
+    }
+  }
+}
+
+if (GradleVersion.current() >= GradleVersion.version('8.8')) {
+  gradle.lifecycle.beforeProject { project ->
+    watch("${project.path} buildscript", project.buildscript.repositories)
+    watch("${project.path}", project.repositories)
+  }
+} else {
+  allprojects { project ->
+    watch("${project.path} buildscript", project.buildscript.repositories)
+    watch("${project.path}", project.repositories)
+  }
+}
