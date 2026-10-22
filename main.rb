@@ -89,7 +89,7 @@ PUBLIC_DISTRIBUTION_HOST = 'services.gradle.org'.freeze
 
 # The wrapper downloads Gradle before any init script runs, so its distributionUrl in the project decides where
 # Gradle comes from. Checks every wrapper of the cloned project and, depending on the mode, points the ones that
-# use services.gradle.org at the mirror (update), stops the build (fail, the default) or only warns (warn).
+# use services.gradle.org at the mirror (update, the default), stops the build (fail) or only warns (warn).
 def check_wrappers(mode, distribution_mirror, proxy_host)
   repository_dir = get_env_variable('AC_REPOSITORY_DIR')
   unless repository_dir && Dir.exist?(repository_dir) && !Dir.empty?(repository_dir)
@@ -120,7 +120,7 @@ def check_wrappers(mode, distribution_mirror, proxy_host)
       next
     end
 
-    if mode == 'update'
+    if mode == 'update' && distribution_mirror
       new_url = "#{distribution_mirror}#{URI(url).path.delete_prefix('/')}"
       lines[index] = "distributionUrl=#{new_url.sub('://', '\\://')}"
       temp = "#{wrapper}.#{Process.pid}.tmp"
@@ -139,6 +139,9 @@ def check_wrappers(mode, distribution_mirror, proxy_host)
   puts summary
   return if public_wrappers.empty?
 
+  if mode == 'update'
+    abort_with1("#{public_wrappers.join(', ')} downloads Gradle from #{PUBLIC_DISTRIBUTION_HOST}, and AC_MIRROR_GRADLE_DISTRIBUTION is empty. Set the Gradle Distribution Mirror URL, or point distributionUrl at your artifact proxy in the project.")
+  end
   message = "#{public_wrappers.join(', ')} downloads Gradle from #{PUBLIC_DISTRIBUTION_HOST}. Point distributionUrl at your artifact proxy in the project, or set the Gradle Wrapper input to update."
   mode == 'fail' ? abort_with1(message) : get_warning_msg(message)
 end
@@ -158,14 +161,12 @@ export_for_later_steps(mirror, user, password)
 
 puts "Gradle Mirror: repositories -> #{shown_url(mirror)} (credentials: #{credential_source || 'none'})"
 puts "Gradle Mirror: init script #{init_script}"
-wrapper_mode = (get_env_variable('AC_MIRROR_GRADLE_WRAPPER') || 'fail').downcase
+wrapper_mode = (get_env_variable('AC_MIRROR_GRADLE_WRAPPER') || 'update').downcase
 abort_with1("AC_MIRROR_GRADLE_WRAPPER must be one of #{WRAPPER_MODES.join(', ')}.") unless WRAPPER_MODES.include?(wrapper_mode)
 distribution_mirror = get_env_variable('AC_MIRROR_GRADLE_DISTRIBUTION')
 if distribution_mirror
   abort_with1('AC_MIRROR_GRADLE_DISTRIBUTION must be an http or https URL.') unless distribution_mirror.match?(%r{\Ahttps?://\S+\z})
   distribution_mirror += '/' unless distribution_mirror.end_with?('/')
-elsif wrapper_mode == 'update'
-  abort_with1('The Gradle Wrapper input is update, but AC_MIRROR_GRADLE_DISTRIBUTION is empty.')
 end
 proxy_host = URI(distribution_mirror || mirror).host
 check_wrappers(wrapper_mode, distribution_mirror, proxy_host)

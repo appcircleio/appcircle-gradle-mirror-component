@@ -9,8 +9,8 @@ Supported: Gradle 7.0 and later.
 ## Optional Input Variables
 
 - `$AC_MIRROR_GRADLE`: URL of a Maven repository on your artifact proxy, usually a group (see [Artifact Proxy Setup](#artifact-proxy-setup)). Every remote repository of the build is sent to it. If empty, the step does nothing.
-- `$AC_MIRROR_GRADLE_DISTRIBUTION`: URL of a raw (generic) repository on your artifact proxy that proxies `https://services.gradle.org/`. Used when Gradle Wrapper is `update`.
-- Gradle Wrapper (`update`, `fail` or `warn`, default `fail`): what the step does when a `gradle-wrapper.properties` of the project still downloads Gradle from services.gradle.org. Set it on the step, not in the group: it depends on the project.
+- `$AC_MIRROR_GRADLE_DISTRIBUTION`: URL of a raw (generic) repository on your artifact proxy that proxies `https://services.gradle.org/`. Used when Gradle Wrapper is `update` (the default).
+- Gradle Wrapper (`update`, `fail` or `warn`, default `update`): what the step does when a `gradle-wrapper.properties` of the project still downloads Gradle from services.gradle.org. Set it on the step, not in the group: it depends on the project.
 - `$AC_MIRROR_GRADLE_USERNAME`: User for the Gradle mirror.
 - `$AC_MIRROR_GRADLE_PASSWORD`: Password for the Gradle mirror user. Store it as a secret environment variable.
 - `$AC_MIRROR_USERNAME`: User shared by all mirror steps. Used when both Gradle mirror credentials are empty.
@@ -44,8 +44,8 @@ The Gradle wrapper downloads Gradle before any init script runs, so it uses the 
 
 - A wrapper that already downloads from your artifact proxy, or from any host other than services.gradle.org, is left as it is.
 - A wrapper that downloads from services.gradle.org depends on the Gradle Wrapper input:
-  - `update`: the step points `distributionUrl` at `AC_MIRROR_GRADLE_DISTRIBUTION` in the cloned copy and logs the change. Nothing is pushed back to your repository. `distributionSha256Sum` keeps working, because the proxy serves the same file.
-  - `fail` (default): the build stops at once and names the file, instead of failing later on a connection timeout.
+  - `update` (default): the step points `distributionUrl` at `AC_MIRROR_GRADLE_DISTRIBUTION` in the cloned copy and logs the change. Nothing is pushed back to your repository. `distributionSha256Sum` keeps working, because the proxy serves the same file. If `AC_MIRROR_GRADLE_DISTRIBUTION` is empty, the build stops and names the file.
+  - `fail`: the build stops at once and names the file, instead of failing later on a connection timeout.
   - `warn`: the step prints a warning and the build continues.
 
 To keep the project and your developers' machines on the proxy as well, set `distributionUrl` in the project:
